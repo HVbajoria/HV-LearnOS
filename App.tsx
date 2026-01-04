@@ -20,76 +20,7 @@ import { Icons } from './constants';
 import { SlideView } from './components/SlideView';
 import { ChatWidget } from './components/ChatWidget';
 import { useGeminiLive } from './hooks/useGeminiLive';
-import ScrollingBackground from './components/ScrollingBackground';
 import { CURATED_TOPICS, CuratedTopic } from './data/curatedTopics';
-
-// Curated Topic Card Component with Wikimedia API image loading
-const CuratedTopicCard: React.FC<{ topic: CuratedTopic; onClick: () => void }> = ({ topic, onClick }) => {
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchImage = async () => {
-      try {
-        const params = new URLSearchParams({
-          origin: '*',
-          action: 'query',
-          generator: 'search',
-          gsrsearch: `${topic.imageKeyword} filetype:bitmap`,
-          gsrnamespace: '6',
-          gsrlimit: '1',
-          prop: 'imageinfo',
-          iiprop: 'url',
-          iiurlwidth: '400',
-          format: 'json'
-        });
-
-        const res = await fetch(`https://commons.wikimedia.org/w/api.php?${params}`);
-        const data = await res.json();
-
-        if (data.query?.pages) {
-          const pages = Object.values(data.query.pages) as any[];
-          const info = pages[0]?.imageinfo?.[0];
-          if (info?.thumburl || info?.url) {
-            setImageUrl(info.thumburl || info.url);
-          }
-        }
-      } catch {
-        // Use placeholder on error
-      }
-    };
-
-    fetchImage();
-  }, [topic.imageKeyword]);
-
-  const placeholderUrl = `https://placehold.co/400x300/27272a/71717a?text=${encodeURIComponent(topic.title.slice(0, 15))}`;
-
-  return (
-    <button
-      onClick={onClick}
-      className="group text-left bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-600 rounded-2xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-xl"
-    >
-      <div className="aspect-[4/3] relative overflow-hidden bg-zinc-800">
-        {imageUrl ? (
-          <img
-            src={imageUrl}
-            alt={topic.title}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-            onError={(e) => { (e.target as HTMLImageElement).src = placeholderUrl; }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <div className="w-8 h-8 border-2 border-zinc-600 border-t-zinc-400 rounded-full animate-spin" />
-          </div>
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-      </div>
-      <div className="p-5">
-        <h4 className="font-bold text-white text-base mb-2 group-hover:text-amber-400 transition-colors">{topic.title}</h4>
-        <p className="text-zinc-500 text-sm leading-relaxed">{topic.tagline}</p>
-      </div>
-    </button>
-  );
-};
 
 function App() {
   // View state
@@ -131,9 +62,10 @@ function App() {
   const [activeModuleIndex, setActiveModuleIndex] = useState(0);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [isGeneratingModule, setIsGeneratingModule] = useState(false);
+  // Track completion state for slides (keyed by moduleIndex-slideId to avoid id collisions)
+  const [completedSlides, setCompletedSlides] = useState<Record<string, boolean>>({});
 
   // On-demand image selection tracking
-  // Tracks which modules have had their images selected
   const [imagesSelectedForModule, setImagesSelectedForModule] = useState<boolean[]>([]);
 
   // UI Panels State
@@ -148,6 +80,11 @@ function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Voice and chat states
+  const [isListening, setIsListening] = useState(false);
+  const [currentTranscript, setCurrentTranscript] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
 
   // Voice chat for Learning View - with full slide context
   const currentSlideForVoice = course?.modules[activeModuleIndex]?.slides[activeSlideIndex];
@@ -165,14 +102,7 @@ function App() {
     onMessage: (msg) => {
       setChatMessages(prev => [...prev, { role: msg.role, text: msg.text, timestamp: Date.now() }]);
     },
-    initialContext: course ? `[CONTEXT: You are a friendly, enthusiastic AI tutor. The student is learning about "${course.topic}".
-
-CURRENT SLIDE: "${currentSlideForVoice?.title || 'Introduction'}"
-
-SLIDE CONTENT:
-${slideContentForVoice}
-
-YOUR TASK: Start with an engaging, brief greeting that shows excitement about what they're exploring. Something like "Oh cool, you're looking at [topic]! That's fascinating because..." - make them feel curious and engaged. Then be ready to answer any questions they have. Keep all responses conversational and brief since this is voice chat.]` : undefined
+    initialContext: course ? `[CONTEXT: You are a friendly, enthusiastic AI tutor. The student is learning about "${course.topic}".\n\nCURRENT SLIDE: "${currentSlideForVoice?.title || 'Introduction'}"\n\nSLIDE CONTENT:\n${slideContentForVoice}\n\nYOUR TASK: Start with an engaging, brief greeting that shows excitement about what they're exploring. Something like "Oh cool, you're looking at [topic]! That's fascinating because..." - make them feel curious and engaged. Then be ready to answer any questions they have. Keep all responses conversational and brief since this is voice chat.]` : undefined
   });
 
   // Build conversation context for consultant voice
@@ -197,18 +127,8 @@ YOUR TASK: Start with an engaging, brief greeting that shows excitement about wh
       }, 500);
     },
     initialContext: conversationContextForVoice
-      ? `[CONTEXT: You are a friendly learning consultant continuing a conversation about what the user wants to learn.
-
-CONVERSATION SO FAR:
-${conversationContextForVoice}
-
-YOUR TASK: Continue this natural conversation to help the user clarify what they want to learn. When you feel you have enough information, offer to create a personalized curriculum. If the user agrees (says yes, sure, ok, go ahead, create it, etc.), call the request_curriculum_generation function. Keep responses conversational and brief since this is voice chat.]`
-      : `[CONTEXT: You are a friendly learning consultant. Start by warmly greeting the user and asking what they'd like to learn about today. Ask follow-up questions to understand:
-- What topic interests them
-- Their current knowledge level
-- What they want to achieve
-
-When you feel you have enough information, offer to create a personalized curriculum. ONLY call the request_curriculum_generation function when the user explicitly agrees or asks you to create it. Keep responses conversational and brief since this is voice chat.]`
+      ? `[CONTEXT: You are a friendly learning consultant continuing a conversation about what the user wants to learn.\n\nCONVERSATION SO FAR:\n${conversationContextForVoice}\n\nYOUR TASK: Continue this natural conversation to help the user clarify what they want to learn. When you feel you have enough information, offer to create a personalized curriculum. If the user agrees (says yes, sure, ok, go ahead, create it, etc.), call the request_curriculum_generation function. Keep responses conversational and brief since this is voice chat.]`
+      : `[CONTEXT: You are a friendly learning consultant. Start by warmly greeting the user and asking what they'd like to learn about today. Ask follow-up questions to understand:\n- What topic interests them\n- Their current knowledge level\n- What they want to achieve\n\nWhen you feel you have enough information, offer to create a personalized curriculum. ONLY call the request_curriculum_generation function when the user explicitly agrees or asks you to create it. Keep responses conversational and brief since this is voice chat.]`
   });
 
   const clarificationEndRef = useRef<HTMLDivElement>(null);
@@ -295,6 +215,13 @@ When you feel you have enough information, offer to create a personalized curric
       refinementEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [refinementMessages, view]);
+
+  // Auto-scroll chat messages in learning view
+  useEffect(() => {
+    if (view === 'LEARNING' && showChatPane) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, isTyping, isChatLoading, currentTranscript, view, showChatPane]);
 
   const saveToHistory = (c: Course) => {
     const newHistory = [c, ...history.filter(h => h.id !== c.id)].slice(0, 10);
@@ -912,6 +839,14 @@ When you feel you have enough information, offer to create a personalized curric
 
   const navigateSlide = async (direction: 'next' | 'prev') => {
     if (!course) return;
+    // If moving forward, mark current slide as completed (use module-prefixed key)
+    if (direction === 'next') {
+      try {
+        const currId = course.modules[activeModuleIndex].slides[activeSlideIndex].id;
+        const key = `${activeModuleIndex}-${currId}`;
+        setCompletedSlides(prev => ({ ...prev, [key]: true }));
+      } catch (e) { /* ignore */ }
+    }
 
     let newMod = activeModuleIndex;
     let newSlide = activeSlideIndex;
@@ -1026,7 +961,7 @@ When you feel you have enough information, offer to create a personalized curric
   // VIEWS
   // ============================================
 
-  // HOME VIEW - Redesigned with sidebar
+  // HOME VIEW - Modern Minimalistic Design
   if (view === 'HOME') {
     const deleteFromHistory = (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
@@ -1036,874 +971,380 @@ When you feel you have enough information, offer to create a personalized curric
     };
 
     return (
-      <div className="h-screen bg-zinc-950 flex">
-        {/* Sidebar - Past Experiences (toggleable) */}
-        <div
-          className={`border-r border-zinc-800 bg-zinc-900/30 flex flex-col h-full hidden md:flex transition-all duration-300 ease-in-out ${
-            showHistorySidebar ? 'w-72' : 'w-16'
-          }`}
-        >
-          {/* Sidebar Header with Toggle */}
-          <div className="p-4 border-b border-zinc-800">
+      <div className="min-h-screen bg-gray-50">
+        {/* Clean Header */}
+        <header className="border-b border-gray-200 bg-white/95 backdrop-blur-sm sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl text-black flex-shrink-0">
-                <Icons.Brain />
-              </div>
-              {showHistorySidebar && (
-                <div className="overflow-hidden">
-                  <h1 className="font-bold text-white text-lg">HV LearnOS</h1>
-                  <p className="text-zinc-500 text-xs">AI Learning Platform</p>
-                </div>
-              )}
+              <img src="https://d8it4huxumps7.cloudfront.net/uploads/images/unstop/branding-guidelines/logos/blue/Unstop-Logo-Blue-Medium.png" alt="V" className="w-13 h-9 ml-[-6px]" />
+              <div className="w-8 h-8 bg-gray-900 rounded-xl flex items-center justify-center">
+                <img src="https://d8it4huxumps7.cloudfront.net/files/695ab459af53f_screenshot_2026_01_05_at_12_10_44_am.png" alt="H" className="w-5 h-5"   />
+              </div>          
+            <span className="font-medium text-gray-900">HV LearnOS</span>
             </div>
-            {/* Toggle Button */}
-            <button
-              onClick={() => setShowHistorySidebar(!showHistorySidebar)}
-              className="mt-4 w-full p-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-800 transition-colors flex items-center justify-center gap-2 text-zinc-400 hover:text-white"
-              title={showHistorySidebar ? "Hide sidebar" : "Show past experiences"}
-            >
-              <Icons.MessageCircle />
-              {showHistorySidebar && <span className="text-sm">History</span>}
-            </button>
+            {history.length > 0 && (
+              <button 
+                onClick={() => setShowHistorySidebar(!showHistorySidebar)}
+                className="text-sm text-gray-500 hover:text-gray-900 transition-colors px-3 py-1.5 rounded-lg hover:bg-gray-100"
+              >
+                History ({history.length})
+              </button>
+            )}
           </div>
+        </header>
 
-          {/* Past Experiences List (only when expanded) */}
-          {showHistorySidebar && (
-            <div className="flex-1 overflow-y-auto p-4">
-              <h3 className="text-zinc-500 uppercase text-xs font-bold tracking-widest mb-3">Past Experiences</h3>
-              {history.length === 0 ? (
-                <p className="text-zinc-600 text-sm">No experiences yet. Start learning something new!</p>
-              ) : (
-                <div className="space-y-2">
-                  {history.map((item) => (
-                    <div
-                      key={item.id}
-                      onClick={() => loadFromHistory(item)}
-                      className="group p-3 rounded-lg bg-zinc-800/30 border border-zinc-800/50 hover:bg-zinc-800 hover:border-zinc-700 transition-all cursor-pointer"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-zinc-300 text-sm font-medium group-hover:text-white transition-colors line-clamp-2">
-                          {item.title || item.topic}
-                        </span>
-                        <button
-                          onClick={(e) => deleteFromHistory(item.id, e)}
-                          className="text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
-                          title="Delete"
-                        >
-                          <Icons.X />
-                        </button>
-                      </div>
-                      <div className="text-zinc-600 text-xs mt-1">
-                        {item.modules?.length || 0} modules
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Main Content Area - Scrollable */}
-        <div className="flex-1 overflow-y-auto">
-          {/* Hero Section with Scrolling Background - Fixed Height */}
-          <div className="relative min-h-[80vh] flex flex-col items-center justify-center p-6 overflow-hidden">
-            {/* Animated Scrolling Image Background - contained to hero */}
-            <ScrollingBackground />
-
-            <div className="z-10 max-w-xl w-full text-center space-y-8 animate-fade-in-up">
-            {/* Mobile Logo */}
-            <div className="md:hidden flex justify-center mb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-gradient-to-br from-amber-400 to-orange-500 rounded-xl text-black">
-                  <Icons.Brain />
-                </div>
-                <h1 className="font-bold text-white text-2xl">HV LearnOS</h1>
-              </div>
-            </div>
-
-            {/* Main Heading */}
-            <div className="space-y-3">
-              <h2 className="text-4xl md:text-5xl font-bold text-white tracking-tight">
-                What do you want to <span className="text-amber-400">learn</span>?
-              </h2>
-              <p className="text-zinc-400 text-lg">
-                Master any topic with AI-powered structured learning
+        {/* Hero Section */}
+        <main className="max-w-4xl mx-auto px-6 py-16">
+          <div className="text-center space-y-10">
+            <div className="space-y-6">
+              <h1 className="text-4xl md:text-5xl font-normal text-gray-900 tracking-tight leading-tight">
+                Learn anything
+              </h1>
+              <p className="text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
+                AI-powered learning experiences tailored for you
               </p>
             </div>
 
-            {/* Input Section - Larger 2-row prompt box */}
-            <div className="space-y-6 w-full max-w-2xl">
-              <div className="relative group">
-                {/* Glow effect behind input */}
-                <div className="absolute -inset-3 bg-gradient-to-r from-amber-400/20 via-orange-500/20 to-amber-400/20 rounded-3xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                {/* Large prompt box */}
-                <div className="relative bg-zinc-900/95 border-2 border-zinc-700 rounded-2xl shadow-2xl focus-within:ring-4 focus-within:ring-amber-400/30 focus-within:border-amber-400 transition-all overflow-visible">
-                  {/* Top row: Input field with Send button */}
-                  <div className="flex items-center">
-                    <input
-                      type="text"
-                      value={topic}
-                      onChange={(e) => setTopic(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleInitialSubmit()}
-                      placeholder={isChatMode ? "Describe what you want to learn..." : "Enter a topic to learn about..."}
-                      className="flex-1 min-w-0 bg-transparent text-white text-xl px-6 py-6 focus:outline-none placeholder-zinc-500"
-                    />
-                    <div className="flex-shrink-0 pr-3">
-                      <button
-                        onClick={handleInitialSubmit}
-                        disabled={isLoading || !topic.trim()}
-                        className="bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-500 hover:to-orange-600 text-zinc-950 rounded-lg px-5 py-2.5 flex items-center gap-2 transition-all disabled:opacity-50 font-semibold text-sm shadow-lg whitespace-nowrap"
-                      >
-                        {isLoading ? (
-                          <span className="animate-spin h-5 w-5 border-2 border-black border-t-transparent rounded-full"></span>
-                        ) : (
-                          <>Start<Icons.ArrowRight /></>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  {/* Bottom row: Mode dropdown at left corner */}
-                  <div className="border-t border-zinc-800 px-3 py-2 flex items-center">
-                    <div className="relative">
-                      <button
-                        onClick={() => setModeDropdownOpen(!modeDropdownOpen)}
-                        onBlur={() => setTimeout(() => setModeDropdownOpen(false), 150)}
-                        className="flex items-center gap-2 px-3 py-2 text-zinc-400 hover:text-amber-400 text-sm transition-colors rounded-lg hover:bg-zinc-800/50"
-                      >
-                        <span>{learningMode === 'curriculum' ? '📚' : learningMode === 'article' ? '📄' : '🎬'}</span>
-                        <span className="capitalize">{learningMode === 'presentation' ? 'Presentation' : learningMode}</span>
-                        <svg className={`w-3 h-3 transition-transform ${modeDropdownOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-                      {modeDropdownOpen && (
-                        <div className="absolute bottom-full left-0 mb-2 w-48 bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl overflow-hidden z-50">
-                          {[
-                            { value: 'curriculum', label: 'Curriculum', emoji: '📚', desc: 'Structured modules' },
-                            { value: 'article', label: 'Article', emoji: '📄', desc: 'Single page read' },
-                            { value: 'presentation', label: 'Presentation', emoji: '🎬', desc: 'Visual slides' }
-                          ].map((option) => (
-                            <button
-                              key={option.value}
-                              onMouseDown={(e) => { e.preventDefault(); setLearningMode(option.value as LearningMode); setModeDropdownOpen(false); }}
-                              className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-800 transition-colors ${
-                                learningMode === option.value ? 'bg-zinc-800 text-amber-400' : 'text-white'
-                              }`}
-                            >
-                              <span className="text-lg">{option.emoji}</span>
-                              <div>
-                                <div className="font-medium">{option.label}</div>
-                                <div className="text-xs text-zinc-500">{option.desc}</div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Mode Toggle and Settings */}
-              <div className="flex flex-col items-center gap-4">
-                {/* Quick/Guided Toggle */}
-                <div className="flex items-center gap-4 text-sm">
-                  <span className={`transition-colors ${!isChatMode ? 'text-white font-medium' : 'text-zinc-500'}`}>Quick Generate</span>
-                  <button
-                    onClick={() => setIsChatMode(!isChatMode)}
-                    className={`w-14 h-7 rounded-full p-1 transition-colors ${isChatMode ? 'bg-amber-400' : 'bg-zinc-800'}`}
-                  >
-                    <div className={`w-5 h-5 rounded-full bg-black transition-transform ${isChatMode ? 'translate-x-7' : 'translate-x-0'}`}></div>
-                  </button>
-                  <span className={`transition-colors ${isChatMode ? 'text-white font-medium' : 'text-zinc-500'}`}>Guided Chat</span>
-                  {/* Settings button - only show in Quick Generate mode */}
-                  {!isChatMode && (
-                    <button
-                      onClick={() => setShowSettingsModal(true)}
-                      className="ml-2 p-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors"
-                      title="Personalization Settings"
-                    >
-                      <Icons.Settings />
-                    </button>
+            {/* Search Input */}
+            <div className="max-w-2xl mx-auto">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={topic}
+                  onChange={(e) => setTopic(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleInitialSubmit()}
+                  placeholder="What would you like to learn today?"
+                  className="w-full px-6 py-4 text-base text-gray-900 bg-white border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all shadow-sm"
+                />
+                <button
+                  onClick={handleInitialSubmit}
+                  disabled={isLoading || !topic.trim()}
+                  className="absolute right-2 top-2 bottom-2 px-6 bg-gray-900 text-white rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors font-medium"
+                >
+                  {isLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    'Start'
                   )}
-                </div>
+                </button>
+              </div>
+              
+              {/* Mode Selection */}
+              <div className="flex items-center justify-center gap-3 mt-8">
+                {[
+                  { value: 'curriculum', label: 'Course', icon: '📚' },
+                  { value: 'article', label: 'Article', icon: '📄' },
+                  { value: 'presentation', label: 'Slides', icon: '🎬' }
+                ].map((mode) => (
+                  <button
+                    key={mode.value}
+                    onClick={() => setLearningMode(mode.value as LearningMode)}
+                    className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                      learningMode === mode.value
+                        ? 'bg-gray-900 text-white shadow-sm'
+                        : 'bg-white text-gray-600 hover:text-gray-900 hover:bg-gray-100 border border-gray-200'
+                    }`}
+                  >
+                    <span className="mr-2">{mode.icon}</span>
+                    {mode.label}
+                  </button>
+                ))}
               </div>
 
-              <p className="text-zinc-600 text-sm">
-                {learningMode === 'curriculum'
-                  ? (isChatMode ? "I'll ask a few questions to personalize your learning experience" : "Generate a curriculum instantly based on your topic")
-                  : learningMode === 'article'
-                  ? "Generate a comprehensive article with sections and images"
-                  : "Create an interactive presentation with slides and voice"
-                }
-              </p>
+              {/* Chat Toggle */}
+              <div className="flex items-center justify-center gap-4 mt-6">
+                <span className={`text-sm font-medium ${!isChatMode ? 'text-gray-900' : 'text-gray-500'}`}>Quick</span>
+                <button
+                  onClick={() => setIsChatMode(!isChatMode)}
+                  className={`relative w-12 h-6 rounded-full transition-colors ${
+                    isChatMode ? 'bg-gray-900' : 'bg-gray-300'
+                  }`}
+                >
+                  <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow-sm ${
+                    isChatMode ? 'translate-x-6' : 'translate-x-0.5'
+                  }`} />
+                </button>
+                <span className={`text-sm font-medium ${isChatMode ? 'text-gray-900' : 'text-gray-500'}`}>Guided</span>
+              </div>
             </div>
 
             {isLoading && (
-              <div className="text-amber-400 text-sm animate-pulse tracking-wide">{loadingText}</div>
-            )}
-
-            {/* Settings Modal */}
-            {showSettingsModal && (
-              <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={() => setShowSettingsModal(false)}>
-                <div
-                  className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-md w-full shadow-2xl"
-                  onClick={e => e.stopPropagation()}
-                >
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-xl font-bold text-white">Personalization Settings</h3>
-                    <button
-                      onClick={() => setShowSettingsModal(false)}
-                      className="text-zinc-500 hover:text-white transition-colors"
-                    >
-                      <Icons.X />
-                    </button>
-                  </div>
-
-                  <div className="space-y-5">
-                    <div>
-                      <label className="block text-zinc-400 text-sm font-medium mb-2">Knowledge Level</label>
-                      <select
-                        value={preferences.knowledgeLevel}
-                        onChange={e => updatePreferences({ knowledgeLevel: e.target.value as LearningPreferences['knowledgeLevel'] })}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:border-amber-400 focus:outline-none transition-colors"
-                      >
-                        <option value="beginner">Beginner - New to this topic</option>
-                        <option value="intermediate">Intermediate - Some familiarity</option>
-                        <option value="advanced">Advanced - Good understanding</option>
-                        <option value="expert">Expert - Deep expertise</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-zinc-400 text-sm font-medium mb-2">Preferred Depth</label>
-                      <select
-                        value={preferences.preferredDepth}
-                        onChange={e => updatePreferences({ preferredDepth: e.target.value as LearningPreferences['preferredDepth'] })}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white focus:border-amber-400 focus:outline-none transition-colors"
-                      >
-                        <option value="quick">Quick Overview - 3 modules</option>
-                        <option value="standard">Standard Learning - 4 modules</option>
-                        <option value="deep">Deep Study - 5 modules</option>
-                        <option value="comprehensive">Comprehensive Mastery - 6 modules</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-zinc-400 text-sm font-medium mb-2">Custom Instructions (Optional)</label>
-                      <textarea
-                        value={preferences.customInstructions}
-                        onChange={e => updatePreferences({ customInstructions: e.target.value })}
-                        placeholder="E.g., Focus on practical examples..."
-                        rows={3}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:border-amber-400 focus:outline-none transition-colors resize-none"
-                      />
-                      <label className="flex items-center gap-2 mt-2 text-sm text-zinc-400 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={saveCustomInstructions}
-                          onChange={e => setSaveCustomInstructions(e.target.checked)}
-                          className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-amber-400 focus:ring-amber-400 focus:ring-offset-zinc-900"
-                        />
-                        Save for future queries
-                      </label>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => setShowSettingsModal(false)}
-                    className="w-full mt-6 bg-amber-400 hover:bg-amber-500 text-black font-semibold py-3 rounded-xl transition-colors"
-                  >
-                    Save Settings
-                  </button>
+              <div className="text-center py-8">
+                <div className="inline-flex items-center gap-3 px-6 py-3 bg-white rounded-xl shadow-sm border border-gray-200">
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                  <span className="text-gray-700 font-medium">{loadingText}</span>
                 </div>
               </div>
             )}
           </div>
-          </div>
 
-          {/* Curated Topics Section - Below hero, solid background */}
-          <div className="bg-zinc-950 border-t border-zinc-900 px-6 md:px-12 py-16">
-            <div className="max-w-6xl mx-auto">
-              <h3 className="text-white text-2xl font-bold mb-10 text-center">Curated Experiences</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                {CURATED_TOPICS.map((curatedTopic) => (
-                  <CuratedTopicCard
-                    key={curatedTopic.id}
-                    topic={curatedTopic}
+          {/* History Sidebar */}
+          {showHistorySidebar && history.length > 0 && (
+            <div className="fixed top-20 right-6 w-80 bg-white border border-gray-200 rounded-2xl shadow-xl z-40 max-h-96 overflow-y-auto">
+              <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+                <h3 className="font-medium text-gray-900">Continue Learning</h3>
+                <button onClick={() => setShowHistorySidebar(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+                  <Icons.X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-4 space-y-2">
+                {history.map((item) => (
+                  <button
+                    key={item.id}
                     onClick={() => {
-                      setCurriculum(curatedTopic.curriculum);
-                      // Don't set topic to avoid filling home page prompt bar
-                      setRefinementMessages([]);
-                      setView('CURRICULUM_REVIEW');
+                      loadFromHistory(item);
+                      setShowHistorySidebar(false);
                     }}
-                  />
+                    className="w-full flex items-center justify-between p-3 hover:bg-gray-50 rounded-xl transition-colors text-left group"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900 text-sm">{item.title || item.topic}</div>
+                      <div className="text-xs text-gray-500">{item.modules?.length || 0} modules</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Icons.ArrowRight className="w-4 h-4 text-gray-400" />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteFromHistory(item.id, e);
+                        }}
+                        className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all p-1 rounded"
+                      >
+                        <Icons.X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </button>
                 ))}
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Mobile History */}
+          {/* Curated Topics */}
+          {CURATED_TOPICS.length > 0 && (
+            <div className="mt-20">
+              <h2 className="text-2xl font-normal text-gray-900 text-center mb-12">Popular topics</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {CURATED_TOPICS.map((curatedTopic) => (
+                  <button
+                    key={curatedTopic.id}
+                    onClick={() => {
+                      setCurriculum(curatedTopic.curriculum);
+                      setRefinementMessages([]);
+                      setView('CURRICULUM_REVIEW');
+                    }}
+                    className="group p-6 bg-white hover:bg-gray-50 rounded-2xl transition-all text-left border border-gray-200 hover:shadow-sm"
+                  >
+                    {curatedTopic.imageUrl && (
+                      <div className="mb-4">
+                        <img 
+                          src={curatedTopic.imageUrl} 
+                          alt={curatedTopic.title}
+                          className="w-12 h-12 object-contain mx-auto"
+                        />
+                      </div>
+                    )}
+                    {!curatedTopic.imageUrl && (
+                      <div className="text-2xl mb-4 text-center">{curatedTopic.title.split(' ')[0] === 'Machine' ? '🤖' : curatedTopic.title.split(' ')[0] === 'Quantum' ? '⚛️' : curatedTopic.title.split(' ')[0] === 'Climate' ? '🌍' : '📊'}</div>
+                    )}
+                    <h3 className="font-medium text-gray-900 mb-2 text-center">{curatedTopic.title}</h3>
+                    <p className="text-sm text-gray-600 text-center">{curatedTopic.tagline}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* History */}
           {history.length > 0 && (
-            <div className="md:hidden bg-zinc-950 px-6 py-8">
-              <h3 className="text-zinc-600 uppercase text-xs font-bold tracking-widest mb-3">Continue Learning</h3>
-              <div className="space-y-2">
+            <div className="mt-16">
+              <h2 className="text-xl font-normal text-gray-900 mb-6">Continue learning</h2>
+              <div className="space-y-3">
                 {history.slice(0, 3).map((item) => (
                   <button
                     key={item.id}
                     onClick={() => loadFromHistory(item)}
-                    className="w-full flex items-center justify-between p-4 rounded-xl bg-zinc-900/50 border border-zinc-800/50 hover:bg-zinc-900 hover:border-zinc-700 transition-all"
+                    className="w-full flex items-center justify-between p-4 bg-white hover:bg-gray-50 rounded-xl transition-colors text-left border border-gray-200"
                   >
-                    <span className="text-zinc-300 font-medium">{item.title || item.topic}</span>
-                    <Icons.ArrowRight />
+                    <div>
+                      <div className="font-medium text-gray-900">{item.title || item.topic}</div>
+                      <div className="text-sm text-gray-500">{item.modules?.length || 0} modules</div>
+                    </div>
+                    <Icons.ArrowRight className="w-4 h-4 text-gray-400" />
                   </button>
                 ))}
               </div>
             </div>
           )}
-        </div>
+        </main>
       </div>
     );
   }
 
-  // CLARIFICATION VIEW (Chat Mode Consultation)
+  // CLARIFICATION VIEW - Modern Chat Interface
   if (view === 'CLARIFICATION') {
     return (
-      <div className="h-screen bg-zinc-950 flex flex-col p-4 md:p-8">
-        <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col min-h-0 bg-zinc-900/30 border border-zinc-800 rounded-2xl overflow-hidden">
-          {/* Header */}
-          <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 flex justify-between items-center">
+      <div className="min-h-screen bg-gray-50">
+        <header className="border-b border-gray-200 bg-white/95 backdrop-blur-sm sticky top-0 z-50">
+          <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+            <button
+              onClick={() => setView('HOME')}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors px-3 py-2 rounded-lg hover:bg-gray-100"
+            >
+              <Icons.ArrowLeft className="w-4 h-4" /> Back
+            </button>
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setView('HOME')}
-                className="text-zinc-500 hover:text-white transition-colors"
-              >
-                <Icons.ArrowLeft />
-              </button>
-              <h2 className="text-white font-semibold flex items-center gap-2">
-                <Icons.Brain /> Learning Buddy
-              </h2>
+              {/* {(isConsulting || isLoading) && (
+                <div className="flex items-center gap-2 text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl px-4 py-2">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <span className="font-medium">AI is thinking...</span>
+                </div>
+              )} */}
+              <span className="font-medium text-gray-900">Learning Assistant</span>
             </div>
             <button
               onClick={handleGenerateFromChat}
               disabled={isLoading || clarificationMessages.length < 2}
-              className="bg-amber-400 text-black px-4 py-2 rounded-full text-sm font-semibold hover:bg-amber-500 transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-gray-900 text-white rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors text-sm font-medium"
             >
-              {isLoading ? 'Generating...' : 'Create Curriculum'}
+              {isLoading ? 'Creating...' : 'Create Course'}
             </button>
           </div>
+        </header>
 
-          {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <main className="max-w-4xl mx-auto px-6 py-8">
+          <div className="space-y-6">
             {clarificationMessages.map((msg, idx) => (
               <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[80%] p-4 rounded-2xl text-sm leading-relaxed ${
+                <div className={`max-w-[80%] p-4 rounded-2xl shadow-sm ${
                   msg.role === 'user'
-                  ? 'bg-zinc-800 text-white'
-                  : 'bg-zinc-950 border border-zinc-800 text-zinc-300'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white text-gray-900 border border-gray-200'
                 }`}>
                   {msg.text}
                 </div>
               </div>
             ))}
 
-            {/* Live transcription indicator for voice chat */}
-            {consultantVoice.isActive && (consultantVoice.currentUserText || consultantVoice.currentModelText) && (
-              <div className="space-y-2">
-                {consultantVoice.currentUserText && (
-                  <div className="flex justify-end">
-                    <div className="max-w-[80%] p-4 rounded-2xl text-sm bg-zinc-800/50 text-white/70 italic">
-                      {consultantVoice.currentUserText}...
-                    </div>
-                  </div>
-                )}
-                {consultantVoice.currentModelText && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[80%] p-4 rounded-2xl text-sm bg-zinc-950/50 text-zinc-400 border border-zinc-800 italic">
-                      {consultantVoice.currentModelText}...
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Consulting (thinking) indicator */}
-            {isConsulting && !isLoading && (
+            {(isConsulting || isLoading) && (
               <div className="flex justify-start">
-                <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl text-zinc-500 text-sm animate-pulse">
-                  Thinking...
+                <div className="bg-white border border-gray-200 p-4 rounded-2xl flex items-center gap-3 shadow-sm">
+                  <div className="flex gap-1">
+                    <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <span className="text-gray-600">AI is thinking...</span>
                 </div>
               </div>
             )}
 
-            {/* Curriculum Generation Loading */}
             {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-gradient-to-r from-amber-400/10 to-orange-400/10 border border-amber-400/30 p-5 rounded-2xl flex items-center gap-4">
-                  <div className="animate-spin h-6 w-6 border-3 border-amber-400 border-t-transparent rounded-full"></div>
-                  <div>
-                    <div className="text-amber-400 font-medium">Creating your curriculum...</div>
-                    <div className="text-zinc-500 text-sm mt-1">Designing a personalized learning path</div>
-                  </div>
+              <div className="text-center py-8">
+                <div className="inline-flex items-center gap-3 px-6 py-3 bg-white rounded-xl shadow-sm border border-gray-200">
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                  <span className="text-gray-700 font-medium">{loadingText}</span>
                 </div>
               </div>
             )}
-
-            <div ref={clarificationEndRef} />
           </div>
 
-          {/* Input - disabled when loading */}
-          <div className="p-4 bg-zinc-900/50 border-t border-zinc-800">
-            {/* Live transcription indicator */}
-            {consultantVoice.isActive && (consultantVoice.currentUserText || consultantVoice.currentModelText) && (
-              <div className="mb-3 p-3 bg-zinc-950 border border-zinc-800 rounded-lg text-sm">
-                {consultantVoice.currentUserText && (
-                  <p className="text-zinc-400 italic">You: {consultantVoice.currentUserText}...</p>
-                )}
-                {consultantVoice.currentModelText && (
-                  <p className="text-purple-400 italic">AI: {consultantVoice.currentModelText}...</p>
-                )}
-              </div>
-            )}
-            <div className="flex gap-2">
+          <div className="mt-8 sticky bottom-6">
+            <div className="flex gap-3">
               <input
-                id="consultant-input"
-                className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-zinc-700 disabled:opacity-50"
-                placeholder={isLoading ? "Generating curriculum..." : consultantVoice.isActive ? "Listening..." : "Type your answer..."}
-                disabled={isLoading || consultantVoice.isActive}
+                className="flex-1 px-4 py-3 bg-white text-gray-500 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent shadow-sm"
+                placeholder="Type your response... Or maybe just speak it out loud 😉"
+                disabled={isLoading || isConsulting}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !isLoading && !consultantVoice.isActive) {
+                  if (e.key === 'Enter' && !isLoading && !isConsulting) {
                     handleClarificationSend(e.currentTarget.value);
                     e.currentTarget.value = '';
                   }
                 }}
               />
-              {/* Voice chat button - only show if enabled */}
-              {LIVE_VOICE_ENABLED && (
-                <button
-                  onClick={() => consultantVoice.isActive ? consultantVoice.stop() : consultantVoice.start()}
-                  disabled={isLoading}
-                  className={`rounded-xl px-4 py-3 transition-all ${
-                    consultantVoice.isActive
-                      ? consultantVoice.status === 'speaking'
-                        ? 'bg-purple-600 text-white animate-pulse'
-                        : 'bg-red-600 hover:bg-red-700 text-white'
-                      : 'bg-purple-600 hover:bg-purple-700 text-white'
-                  } disabled:opacity-50`}
-                  title={consultantVoice.isActive ? 'Stop voice chat' : 'Start voice chat'}
-                >
-                  {consultantVoice.isActive ? <Icons.Stop /> : <Icons.Mic />}
-                </button>
-              )}
-              {/* Send button */}
               <button
                 onClick={() => {
-                  const input = document.getElementById('consultant-input') as HTMLInputElement;
-                  if (input?.value.trim() && !isLoading) {
+                  const input = document.querySelector('input[placeholder*="Type your response"]') as HTMLInputElement;
+                  if (input?.value.trim() && !isLoading && !isConsulting) {
                     handleClarificationSend(input.value);
                     input.value = '';
                   }
                 }}
-                disabled={isLoading || consultantVoice.isActive}
-                className="bg-amber-400 hover:bg-amber-500 text-black rounded-xl px-4 py-3 disabled:opacity-50 transition-colors"
-                title="Send message"
+                disabled={isLoading || isConsulting}
+                className="px-6 py-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors font-medium"
               >
-                <Icons.ArrowRight />
+                Send
               </button>
             </div>
           </div>
-        </div>
+        </main>
       </div>
     );
   }
 
-  // CURRICULUM_REVIEW VIEW (Clean, minimal redesign)
+  // CURRICULUM_REVIEW VIEW - Modern Review Interface
   if (view === 'CURRICULUM_REVIEW' && curriculum) {
     return (
-      <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
-        {/* Minimal Header */}
-        <div className="flex-shrink-0 border-b border-zinc-900 bg-zinc-950 px-6 py-4">
-          <div className="max-w-6xl mx-auto flex justify-between items-center">
+      <div className="min-h-screen bg-gray-50">
+        <header className="border-b border-gray-200 bg-white/95 backdrop-blur-sm sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
             <button
               onClick={() => setView('HOME')}
-              className="text-zinc-500 hover:text-white text-sm flex items-center gap-2 transition-colors"
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors px-3 py-2 rounded-lg hover:bg-gray-100"
             >
-              <Icons.ArrowLeft /> Back
+              <Icons.ArrowLeft className="w-4 h-4" /> Back
             </button>
             <button
               onClick={handleGenerateExperience}
               disabled={isLoading}
-              className="bg-amber-400 hover:bg-amber-500 text-black px-5 py-2.5 rounded-full font-semibold transition-all disabled:opacity-50 flex items-center gap-2 text-sm"
+              className="px-6 py-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 disabled:opacity-50 transition-colors font-medium"
             >
-              {isLoading ? (
-                <>
-                  <span className="animate-spin h-4 w-4 border-2 border-black border-t-transparent rounded-full"></span>
-                  Generating...
-                </>
-              ) : (
-                <>
-                  Generate Experience <Icons.ArrowRight />
-                </>
-              )}
+              {isLoading ? 'Generating...' : 'Start Learning'}
             </button>
           </div>
-        </div>
+        </header>
 
-        {/* Scrollable Content */}
-        <div ref={contentScrollRef} className="flex-1 overflow-y-auto">
-          <div className="max-w-6xl mx-auto px-6 py-10 space-y-12">
-
-            {/* Title + Overview Section */}
-            <div className="text-center space-y-4">
-              <h1 className="text-3xl md:text-4xl font-bold text-white tracking-tight leading-tight">
-                {curriculum.title}
-              </h1>
-              <p className="text-zinc-400 text-lg leading-relaxed max-w-4xl mx-auto">
-                {curriculum.overview}
-              </p>
-            </div>
-
-            {/* Modules Section */}
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-white">Modules</h2>
-                <span className="text-zinc-500 text-sm">
-                  {curriculum.modules.length} modules • {curriculum.modules.reduce((acc, m) => acc + m.slides.length, 0)} topics
-                </span>
-              </div>
-
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {curriculum.modules.map((module, modIdx) => (
-                  <div
-                    key={module.id}
-                    className="group border border-zinc-800 rounded-2xl p-6 hover:border-zinc-700 hover:bg-zinc-900/30 transition-all duration-200 flex flex-col"
-                  >
-                    {/* Module Number */}
-                    <div className="text-amber-400 text-sm font-medium mb-2">
-                      Module {String(modIdx + 1).padStart(2, '0')}
-                    </div>
-
-                    {/* Module Title */}
-                    <h3 className="text-white font-semibold text-lg mb-2 leading-snug group-hover:text-amber-50 transition-colors">
-                      {module.title}
-                    </h3>
-
-                    {/* Module Description */}
-                    <p className="text-zinc-500 text-sm leading-relaxed mb-4">
-                      {module.description}
-                    </p>
-
-                    {/* Subtopics List */}
-                    <div className="mt-auto pt-4 border-t border-zinc-800/50">
-                      <div className="text-zinc-600 text-xs font-medium mb-2">Topics</div>
-                      <ul className="space-y-1.5">
-                        {module.slides.map((slide) => (
-                          <li key={slide.id} className="text-zinc-400 text-sm flex items-start gap-2">
-                            <span className="w-1 h-1 rounded-full bg-amber-400/50 flex-shrink-0 mt-2"></span>
-                            <span>{slide.title}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Learning Goals - Collapsed/Minimal */}
-            {curriculum.learningGoals.length > 0 && (
-              <div className="border-t border-zinc-900 pt-10">
-                <details className="group">
-                  <summary className="text-zinc-500 text-sm cursor-pointer hover:text-zinc-300 transition-colors list-none flex items-center gap-2">
-                    <Icons.BookOpen />
-                    <span>View learning goals ({curriculum.learningGoals.length})</span>
-                    <span className="text-zinc-700 group-open:rotate-180 transition-transform">▼</span>
-                  </summary>
-                  <ul className="mt-4 space-y-2 pl-6">
-                    {curriculum.learningGoals.map((goal, idx) => (
-                      <li key={idx} className="text-zinc-400 text-sm flex items-start gap-3">
-                        <span className="text-amber-400/60 mt-0.5">✓</span>
-                        <span>{goal}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              </div>
-            )}
-
-            {/* Refinement Section - At bottom of content */}
-            <div className="border-t border-zinc-900 pt-10">
-              <div className="max-w-3xl mx-auto">
-                <h3 className="text-zinc-400 text-sm font-medium mb-4 text-center">Want to adjust the curriculum?</h3>
-                <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4">
-                  {/* Chat messages (if any) */}
-                  {(isChatMode ? refinementMessages : []).length > 0 && (
-                    <div className="space-y-3 max-h-48 overflow-y-auto mb-4 pr-2">
-                      {refinementMessages.map((msg, idx) => (
-                        <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[80%] px-4 py-2 rounded-xl text-sm ${
-                            msg.role === 'user'
-                              ? 'bg-zinc-800 text-white'
-                              : 'bg-zinc-950 text-zinc-400'
-                          }`}>
-                            {msg.text}
-                          </div>
-                        </div>
-                      ))}
-                      {isRefiningCurriculum && (
-                        <div className="text-zinc-500 text-sm animate-pulse">Updating...</div>
-                      )}
-                      <div ref={refinementEndRef} />
-                    </div>
-                  )}
-
-                  {/* Input */}
-                  <div className="flex gap-3">
-                    <input
-                      type="text"
-                      value={isChatMode ? '' : adjustPrompt}
-                      onChange={isChatMode ? undefined : (e) => setAdjustPrompt(e.target.value)}
-                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-zinc-700 placeholder-zinc-600"
-                      placeholder="e.g., Add more examples, focus on practical applications..."
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !isRefiningCurriculum) {
-                          if (isChatMode) {
-                            handleRefinementSend(e.currentTarget.value);
-                            e.currentTarget.value = '';
-                          } else {
-                            handleAdjustCurriculum();
-                          }
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={isChatMode ? () => {
-                        const input = document.querySelector('input[placeholder*="Add more examples"]') as HTMLInputElement;
-                        if (input?.value) {
-                          handleRefinementSend(input.value);
-                          input.value = '';
-                        }
-                      } : handleAdjustCurriculum}
-                      disabled={isRefiningCurriculum || (!isChatMode && !adjustPrompt.trim())}
-                      className="bg-zinc-800 hover:bg-zinc-700 text-white px-5 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
-                    >
-                      {isRefiningCurriculum ? '...' : 'Adjust'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom padding */}
-            <div className="h-8"></div>
-          </div>
-        </div>
-
-        {/* Full-screen loading overlay */}
-        {isLoading && (
-          <div className="fixed inset-0 bg-zinc-950/90 flex items-center justify-center z-50">
-            <div className="text-center space-y-4">
-              <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mx-auto">
-                <Icons.Sparkles />
-              </div>
-              <p className="text-white font-medium">{loadingText}</p>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ============================================
-  // ARTICLE VIEW - Single scrollable article
-  // ============================================
-  if (view === 'ARTICLE' && article) {
-    return (
-      <div className="h-screen bg-zinc-950 flex overflow-hidden">
-        {/* Main Article Content */}
-        <div className="flex-1 overflow-y-auto">
-          {/* Header */}
-          <div className="sticky top-0 z-10 bg-zinc-950/95 backdrop-blur-sm border-b border-zinc-800 px-8 py-4">
-            <div className="max-w-4xl mx-auto flex items-center justify-between">
-              <button onClick={() => { setView('HOME'); setArticle(null); }} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors">
-                <Icons.ArrowLeft /> Back
-              </button>
-              <button onClick={() => setShowChatPane(!showChatPane)} className={`p-2 rounded-lg transition-colors ${showChatPane ? 'bg-amber-400 text-black' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>
-                <Icons.MessageCircle />
-              </button>
-            </div>
+        <main className="max-w-6xl mx-auto px-6 py-12">
+          <div className="text-center mb-16">
+            <h1 className="text-3xl md:text-4xl font-normal text-gray-900 mb-4 leading-tight">{curriculum.title}</h1>
+            <p className="text-lg text-gray-600 max-w-4xl mx-auto leading-relaxed">{curriculum.overview}</p>
           </div>
 
-          {/* Article Content */}
-          <article className="max-w-4xl mx-auto px-8 py-12">
-            <header className="mb-12 text-center">
-              <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">{article.title}</h1>
-              <p className="text-xl text-zinc-400">{article.overview}</p>
-            </header>
-
-            {article.sections.map((section, idx) => (
-              <section key={section.id} className="mb-12">
-                <h2 className="text-2xl font-semibold text-amber-400 mb-4">{section.title}</h2>
-                {section.imageUrl && (
-                  <div className="mb-6 rounded-xl overflow-hidden max-w-md">
-                    <img src={section.imageUrl} alt={section.title} className="w-full max-h-[200px] object-cover" />
-                  </div>
-                )}
-                <div className="prose prose-invert prose-lg max-w-none">
-                  {section.content.split('\n\n').map((para, pIdx) => (
-                    <p key={pIdx} className="text-zinc-300 leading-relaxed mb-4">{para}</p>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
+            {curriculum.modules.map((module, idx) => (
+              <div key={module.id} className="p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
+                <div className="text-sm text-gray-500 mb-2 font-medium">Module {idx + 1}</div>
+                <h3 className="text-lg font-medium text-gray-900 mb-3">{module.title}</h3>
+                <p className="text-gray-600 text-sm mb-4 leading-relaxed">{module.description}</p>
+                <div className="space-y-2">
+                  {module.slides.map((slide) => (
+                    <div key={slide.id} className="flex items-center gap-2 text-sm text-gray-500">
+                      <div className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
+                      {slide.title}
+                    </div>
                   ))}
                 </div>
-              </section>
+              </div>
             ))}
-          </article>
-        </div>
-
-        {/* Chat Pane - same as learning view */}
-        {showChatPane && (
-          <div className="w-[380px] border-l border-zinc-800 bg-zinc-950 flex flex-col">
-            <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
-              <h3 className="font-semibold text-zinc-200 flex items-center gap-2"><Icons.MessageCircle /> AI Assistant</h3>
-              <button onClick={() => setShowChatPane(false)} className="text-zinc-500 hover:text-white"><Icons.X /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {chatMessages.length === 0 && (
-                <div className="text-center text-zinc-600 text-sm py-8">Ask me anything about this article!</div>
-              )}
-              {chatMessages.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-2xl p-3 text-sm ${msg.role === 'user' ? 'bg-amber-400 text-black' : 'bg-zinc-900 text-zinc-300 border border-zinc-800'}`}>{msg.text}</div>
-                </div>
-              ))}
-            </div>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              if (!chatInput.trim() || isChatLoading) return;
-              setChatMessages(prev => [...prev, { role: 'user', text: chatInput, timestamp: Date.now() }]);
-              setChatInput('');
-              setIsChatLoading(true);
-              try {
-                const response = await generateChatResponse(chatMessages.map(m => ({ role: m.role, parts: [{ text: m.text }] })), `Article: ${article.title}. Question: ${chatInput}`);
-                setChatMessages(prev => [...prev, { role: 'model', text: response, timestamp: Date.now() }]);
-              } catch (e) { console.error(e); }
-              finally { setIsChatLoading(false); }
-            }} className="p-3 bg-zinc-950 border-t border-zinc-900">
-              <div className="flex gap-2">
-                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Ask a question..." className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500" />
-                <button type="submit" disabled={isChatLoading} className="bg-amber-400 hover:bg-amber-500 text-black rounded-xl px-3 py-2 disabled:opacity-50"><Icons.ArrowRight /></button>
-              </div>
-            </form>
           </div>
-        )}
+
+          {isLoading && (
+            <div className="text-center py-8">
+              <div className="inline-flex items-center gap-3 px-6 py-3 bg-white rounded-xl shadow-sm border border-gray-200">
+                <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+                <span className="text-gray-700 font-medium">{loadingText}</span>
+              </div>
+            </div>
+          )}
+        </main>
       </div>
     );
   }
 
-  // ============================================
-  // PRESENTATION VIEW - Slides with navigation
-  // ============================================
-  if (view === 'PRESENTATION' && presentation) {
-    const currentSlide = presentation.slides[activePresentationSlide];
-    const isFirst = activePresentationSlide === 0;
-    const isLast = activePresentationSlide === presentation.slides.length - 1;
-
-    return (
-      <div className="h-screen bg-zinc-950 flex overflow-hidden">
-        {/* Main Presentation Content */}
-        <div className="flex-1 flex flex-col">
-          {/* Header */}
-          <div className="flex-shrink-0 bg-zinc-950/95 border-b border-zinc-800 px-8 py-4">
-            <div className="flex items-center justify-between">
-              <button onClick={() => { setView('HOME'); setPresentation(null); }} className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors">
-                <Icons.ArrowLeft /> Back
-              </button>
-              <span className="text-zinc-500">{activePresentationSlide + 1} / {presentation.slides.length}</span>
-              <button onClick={() => setShowChatPane(!showChatPane)} className={`p-2 rounded-lg transition-colors ${showChatPane ? 'bg-amber-400 text-black' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>
-                <Icons.MessageCircle />
-              </button>
-            </div>
-          </div>
-
-          {/* Slide Content */}
-          <div className="flex-1 flex items-center justify-center p-8 overflow-hidden">
-            <div className="max-w-5xl w-full bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 rounded-3xl p-12 shadow-2xl">
-              <h2 className="text-3xl md:text-4xl font-bold text-white mb-8">{currentSlide.title}</h2>
-
-              <div className="flex gap-8">
-                {/* Points */}
-                <div className="flex-1">
-                  <ul className="space-y-4">
-                    {currentSlide.points.map((point, idx) => (
-                      <li key={idx} className="flex items-start gap-3 text-lg text-zinc-300">
-                        <span className="text-amber-400 mt-1">•</span>
-                        {point}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {/* Images */}
-                {currentSlide.imageUrls && currentSlide.imageUrls.length > 0 && (
-                  <div className="w-1/3 space-y-3">
-                    {currentSlide.imageUrls.filter(url => url).slice(0, 2).map((url, idx) => (
-                      <img key={idx} src={url!} alt="" className="w-full rounded-xl object-cover shadow-lg" />
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <div className="flex-shrink-0 flex justify-center items-center gap-4 py-6 bg-zinc-950 border-t border-zinc-800">
-            <button onClick={() => setActivePresentationSlide(Math.max(0, activePresentationSlide - 1))} disabled={isFirst} className="p-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white disabled:opacity-30"><Icons.ArrowLeft /></button>
-            <div className="flex gap-2">
-              {presentation.slides.map((_, idx) => (
-                <button key={idx} onClick={() => setActivePresentationSlide(idx)} className={`w-3 h-3 rounded-full transition-colors ${idx === activePresentationSlide ? 'bg-amber-400' : 'bg-zinc-700 hover:bg-zinc-600'}`} />
-              ))}
-            </div>
-            <button onClick={() => setActivePresentationSlide(Math.min(presentation.slides.length - 1, activePresentationSlide + 1))} disabled={isLast} className="p-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white disabled:opacity-30"><Icons.ArrowRight /></button>
-          </div>
-        </div>
-
-        {/* Chat Pane */}
-        {showChatPane && (
-          <div className="w-[380px] border-l border-zinc-800 bg-zinc-950 flex flex-col">
-            <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
-              <h3 className="font-semibold text-zinc-200 flex items-center gap-2">
-                <Icons.MessageCircle /> AI Presenter
-                {learningVoice.isActive && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-600">🎤 Live</span>}
-              </h3>
-              <button onClick={() => setShowChatPane(false)} className="text-zinc-500 hover:text-white"><Icons.X /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {chatMessages.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-2xl p-3 text-sm ${msg.role === 'user' ? 'bg-amber-400 text-black' : 'bg-zinc-900 text-zinc-300 border border-zinc-800'}`}>{msg.text}</div>
-                </div>
-              ))}
-              {learningVoice.isActive && (learningVoice.currentUserText || learningVoice.currentModelText) && (
-                <div className="space-y-2">
-                  {learningVoice.currentUserText && <div className="flex justify-end"><div className="max-w-[85%] rounded-2xl p-3 text-sm bg-amber-400/50 text-black/70 italic">{learningVoice.currentUserText}...</div></div>}
-                  {learningVoice.currentModelText && <div className="flex justify-start"><div className="max-w-[85%] rounded-2xl p-3 text-sm bg-zinc-900/50 text-zinc-400 border border-zinc-800 italic">{learningVoice.currentModelText}...</div></div>}
-                </div>
-              )}
-            </div>
-            <div className="p-3 bg-zinc-950 border-t border-zinc-900">
-              <div className="flex gap-2">
-                <button type="button" onClick={() => learningVoice.isActive ? learningVoice.stop() : learningVoice.start()} className={`flex-1 rounded-xl py-3 font-medium transition-all ${learningVoice.isActive ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white'}`}>
-                  {learningVoice.isActive ? '⏹ Stop Voice' : '🎤 Start Voice Presenter'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // LEARNING VIEW with toggleable/resizable sidebars
+  // LEARNING VIEW - Modern Learning Interface
   if (view === 'LEARNING' && course) {
     const currentModule = course.modules[activeModuleIndex];
     const currentSlide = currentModule.slides[activeSlideIndex];
@@ -1911,348 +1352,393 @@ When you feel you have enough information, offer to create a personalized curric
     const isLast = activeModuleIndex === course.modules.length - 1 &&
                    activeSlideIndex === currentModule.slides.length - 1;
 
-    // Drag handlers for resizing
-    const handleCurriculumDrag = (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = curriculumSidebarWidth;
-
-      const onMouseMove = (moveEvent: MouseEvent) => {
-        const delta = moveEvent.clientX - startX;
-        const newWidth = Math.max(200, Math.min(400, startWidth + delta));
-        setCurriculumSidebarWidth(newWidth);
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-      };
-
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-    };
-
-    const handleChatDrag = (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startWidth = chatPaneWidth;
-
-      const onMouseMove = (moveEvent: MouseEvent) => {
-        const delta = startX - moveEvent.clientX;
-        const newWidth = Math.max(280, Math.min(500, startWidth + delta));
-        setChatPaneWidth(newWidth);
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-      };
-
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-    };
-
-    // Chat context - minimal for token efficiency
-    const chatContext = {
-      topic: course.topic,
-      modules: course.modules.map(m => m.title),
-      currentSlide: currentSlide?.title || ''
-    };
-
     return (
-      <div className="flex h-screen bg-zinc-950 overflow-hidden text-white">
-        {/* Left Sidebar - Curriculum (toggleable + resizable) */}
-        <div
-          className={`bg-black border-r border-zinc-900 flex-col hidden md:flex transition-all duration-300 relative ${
-            showCurriculumSidebar ? '' : 'w-12'
-          }`}
-          style={{ width: showCurriculumSidebar ? curriculumSidebarWidth : 48 }}
-        >
-          {showCurriculumSidebar ? (
-            <>
-              <div className="p-4 border-b border-zinc-900 flex items-center justify-between">
-                <h2 className="font-semibold text-base text-zinc-200 truncate flex-1">{course.title}</h2>
-                <button
-                  onClick={() => setShowCurriculumSidebar(false)}
-                  className="text-zinc-500 hover:text-white p-1"
-                  title="Hide sidebar"
-                >
-                  <Icons.ArrowLeft />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-4">
-                {course.modules.map((mod, modIdx) => (
-                  <div key={mod.id}>
-                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 px-2 flex items-center gap-2">
-                      Module {modIdx + 1}
-                      {!mod.isLoaded && <span className="text-amber-400 text-[10px] normal-case">(loading...)</span>}
-                    </div>
-                    <div className="text-sm text-zinc-400 px-2 mb-2 truncate">{mod.title}</div>
-                    <div className="space-y-1">
-                      {mod.slides.map((slide, slideIdx) => (
-                        <button
-                          key={slide.id}
-                          onClick={() => jumpToSlide(modIdx, slideIdx)}
-                          disabled={!mod.isLoaded}
-                          className={`w-full text-left px-2 py-1.5 rounded-lg text-sm transition-all flex items-center gap-2 disabled:opacity-50 ${
-                            modIdx === activeModuleIndex && slideIdx === activeSlideIndex
-                            ? 'bg-zinc-900 text-white font-medium'
-                            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/30'
-                          }`}
-                        >
-                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                            modIdx === activeModuleIndex && slideIdx === activeSlideIndex
-                            ? 'bg-amber-400'
-                            : 'bg-zinc-700'
-                          }`}></div>
-                          <span className="truncate">{slide.title}</span>
-                        </button>
-                      ))}
-                    </div>
+      <div className="min-h-screen bg-gray-50 flex">
+        {/* Sidebar */}
+        <div className="w-80 border-r border-gray-200 bg-white h-screen flex flex-col">
+          <div className="p-6 border-b border-gray-100">
+            <button
+              onClick={() => setView('HOME')}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors mb-4 px-3 py-2 rounded-lg hover:bg-gray-100"
+            >
+              <Icons.ArrowLeft className="w-4 h-4" /> Exit
+            </button>
+            <h2 className="font-medium text-gray-900 truncate">{course.title}</h2>
+          </div>
+          
+          <div className="p-6 space-y-6 overflow-y-auto flex-1">
+            {course.modules.map((mod, modIdx) => {
+              const completedCount = mod.slides.filter(s => !!completedSlides[`${modIdx}-${s.id}`]).length;
+              return (
+                <div key={mod.id}>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Module {modIdx + 1}</div>
+                    <div className="text-xs text-gray-500">{completedCount}/{mod.slides.length} completed</div>
                   </div>
-                ))}
-              </div>
-              <div className="p-3 border-t border-zinc-900">
-                <button onClick={() => setView('HOME')} className="text-sm text-zinc-500 hover:text-white flex items-center gap-2 transition-colors">
-                  <Icons.ArrowLeft /> Exit
-                </button>
-              </div>
-              {/* Resize handle */}
-              <div
-                className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-amber-400/50 transition-colors"
-                onMouseDown={handleCurriculumDrag}
-              />
-            </>
-          ) : (
-            <div className="flex flex-col items-center h-full py-4">
-              <button
-                onClick={() => setShowCurriculumSidebar(true)}
-                className="text-zinc-500 hover:text-white p-2"
-                title="Show curriculum"
-              >
-                <Icons.BookOpen />
-              </button>
-              <div className="flex-1"></div>
-              <button onClick={() => setView('HOME')} className="text-zinc-500 hover:text-white p-2 mb-2" title="Exit">
-                <Icons.ArrowLeft />
-              </button>
-            </div>
-          )}
+                  <div className="text-sm text-gray-700 mb-3 font-medium">{mod.title}</div>
+                  <div className="space-y-1">
+                    {mod.slides.map((slide, slideIdx) => (
+                      <button
+                        key={slide.id}
+                        onClick={() => jumpToSlide(modIdx, slideIdx)}
+                        disabled={!mod.isLoaded}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                          modIdx === activeModuleIndex && slideIdx === activeSlideIndex
+                            ? 'bg-gray-900 text-white'
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                        } disabled:opacity-50 flex items-center justify-between`}
+                      >
+                        <span className="truncate">{slide.title}</span>
+                        {completedSlides[`${modIdx}-${slide.id}`] && (
+                          <span className="text-green-500 ml-2">
+                            <Icons.Check className="w-4 h-4" />
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col h-full relative bg-zinc-950">
-          {/* Desktop Header with Ask AI button */}
-          <div className="hidden md:flex h-14 border-b border-zinc-800 items-center justify-between px-6 bg-zinc-950">
-            <div className="flex items-center gap-3 text-zinc-400 text-sm">
-              <span className="text-zinc-600">Module {activeModuleIndex + 1}</span>
-              <span className="text-zinc-700">•</span>
-              <span className="text-white font-medium truncate max-w-md">{currentSlide?.title}</span>
+        {/* Learning View with Chat */}
+        <div className="flex-1 flex flex-col h-screen">
+          <header className="border-b border-gray-200 px-8 py-4 bg-white">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-500">
+                Module {activeModuleIndex + 1} • {currentSlide?.title}
+              </div>
+              <button
+                onClick={() => setShowChatPane(!showChatPane)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-900 transition-colors text-sm font-medium"
+              >
+                Ask AI
+              </button>
             </div>
-            <button
-              onClick={() => setShowChatPane(!showChatPane)}
-              className={`p-2 rounded-lg transition-colors ${showChatPane ? 'bg-amber-400 text-black' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
-              title="Ask AI"
-            >
-              <Icons.MessageCircle />
-            </button>
-          </div>
+          </header>
 
-          {/* Mobile Header */}
-          <div className="md:hidden h-14 border-b border-zinc-800 flex items-center justify-between px-4 bg-zinc-950">
-            <button onClick={() => setView('HOME')} className="text-zinc-400"><Icons.ArrowLeft /></button>
-            <div className="flex flex-col overflow-hidden text-center">
-              <span className="font-bold truncate text-sm text-white">{currentSlide?.title}</span>
-            </div>
-            <button onClick={() => setShowChatPane(!showChatPane)} className="text-zinc-400">
-              <Icons.MessageCircle />
-            </button>
-          </div>
-
-          {/* Slide Content */}
-          <div ref={contentScrollRef} className="flex-1 overflow-y-auto p-4 md:p-8 pb-28">
-            <div className="max-w-4xl mx-auto w-full">
-              {isGeneratingModule ? (
-                <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6 animate-pulse">
-                  <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center text-white">
-                    <Icons.Sparkles />
-                  </div>
-                  <h2 className="text-xl font-medium text-zinc-300">Loading module...</h2>
+          <main ref={contentScrollRef} className="flex-1 p-8 bg-white overflow-y-auto">
+            {isGeneratingModule ? (
+              <div className="flex items-center justify-center h-64">
+                <div className="text-center">
+                  <div className="w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin mx-auto mb-4" />
+                  <p className="text-gray-600">Loading module...</p>
                 </div>
-              ) : currentSlide && currentSlide.blocks.length > 0 ? (
-                <SlideView slide={currentSlide} />
-              ) : (
-                <div className="flex items-center justify-center min-h-[60vh]">
-                  <p className="text-zinc-500">No content available for this slide.</p>
+              </div>
+            ) : currentSlide && currentSlide.blocks.length > 0 ? (
+              <SlideView slide={currentSlide} />
+            ) : (
+              <div className="flex items-center justify-center h-64">
+                <p className="text-gray-500">No content available for this slide.</p>
+              </div>
+            )}
+          </main>
+
+          <footer className="border-t border-gray-200 px-8 py-4 bg-white">
+            <div className="flex items-center justify-between">
+              <button
+                disabled={isFirst}
+                onClick={() => navigateSlide('prev')}
+                className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 disabled:opacity-30 transition-colors"
+              >
+                <Icons.ArrowLeft className="w-4 h-4" /> Previous
+              </button>
+              <button
+                disabled={isLast}
+                onClick={() => navigateSlide('next')}
+                className="flex items-center gap-2 px-6 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-30 transition-colors font-medium"
+              >
+                Next <Icons.ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </footer>
+        </div>
+
+        {/* Chat Pane */}
+        {showChatPane && (
+          <div className="w-80 border-l border-gray-200 bg-white h-screen flex flex-col">
+            {/* Chat Header with Status */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-medium text-gray-900 flex items-center gap-2">
+                  <span className="text-blue-500">🤖</span>
+                  AI Assistant
+                </h3>
+                <button onClick={() => setShowChatPane(false)} className="text-gray-500 hover:text-gray-700 p-1 rounded-lg hover:bg-gray-100">
+                  <Icons.X className="w-4 h-4" />
+                </button>
+              </div>
+              {/* Status indicators */}
+              {(isChatLoading || isTyping || isListening || currentTranscript) && (
+                <div className="text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded-xl px-3 py-2 flex items-center gap-2">
+                  {isListening && (
+                    <>
+                      <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                      <span className="font-medium">🎤 Listening to your voice...</span>
+                    </>
+                  )}
+                  {currentTranscript && !isListening && (
+                    <>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                      <span className="font-medium">🤔 Processing your speech...</span>
+                    </>
+                  )}
+                  {/* {(isChatLoading || isTyping) && !isListening && !currentTranscript && (
+                    <>
+                      <div className="flex items-center gap-1 mr-2">
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span className="font-medium">AI is thinking...</span>
+                    </>
+                  )} */}
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Bottom Nav */}
-          <div className="h-20 bg-zinc-950/90 backdrop-blur border-t border-zinc-900 flex items-center justify-between px-6 absolute bottom-0 w-full z-20">
-            <button
-              disabled={isFirst}
-              onClick={() => navigateSlide('prev')}
-              className="flex items-center gap-2 text-zinc-500 hover:text-white disabled:opacity-20 transition-colors"
-            >
-              <Icons.ArrowLeft /> Previous
-            </button>
-
-            <button
-              disabled={isLast}
-              onClick={() => navigateSlide('next')}
-              className="flex items-center gap-2 bg-amber-400 hover:bg-amber-500 text-black px-6 py-2.5 rounded-full font-semibold transition-all disabled:opacity-30"
-            >
-              Next <Icons.ArrowRight />
-            </button>
-          </div>
-        </div>
-
-        {/* Right Chat Pane (toggleable + resizable) */}
-        {showChatPane && (
-          <div
-            className="bg-black border-l border-zinc-900 flex flex-col h-full relative transition-all duration-300"
-            style={{ width: chatPaneWidth }}
-          >
-            {/* Resize handle */}
-            <div
-              className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-amber-400/50 transition-colors"
-              onMouseDown={handleChatDrag}
-            />
-
-            {/* Chat Header */}
-            <div className="p-4 border-b border-zinc-900 flex items-center justify-between">
-              <h3 className="font-semibold text-zinc-200 flex items-center gap-2">
-                <Icons.MessageCircle /> AI Tutor
-                {learningVoice.isActive && (
-                  <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
-                    learningVoice.status === 'speaking' ? 'bg-purple-600 animate-pulse' : 'bg-green-600'
-                  }`}>
-                    {learningVoice.status === 'speaking' ? '🔊 Speaking' : '🎤 Listening'}
-                  </span>
-                )}
-              </h3>
-              <button
-                onClick={() => setShowChatPane(false)}
-                className="text-zinc-500 hover:text-white"
-              >
-                <Icons.X />
-              </button>
-            </div>
-
-            {/* Chat Messages */}
+            
+            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {chatMessages.length === 0 && !learningVoice.isActive && (
-                <div className="text-center text-zinc-600 text-sm py-8">
-                  <p className="mb-2">Hi! I'm here to help.</p>
-                  <p>Ask me anything about <span className="text-zinc-400">{currentSlide?.title}</span></p>
+              {chatMessages.length === 0 && (
+                <div className="text-center text-gray-500 text-sm py-8">
+                  <div className="mb-2">💬</div>
+                  <p>Ask me anything about this topic!</p>
+                  <p className="text-xs mt-1">You can type or speak</p>
                 </div>
               )}
               {chatMessages.map((msg, idx) => (
                 <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-2xl p-3 text-sm leading-relaxed ${
-                    msg.role === 'user'
-                      ? 'bg-amber-400 text-black'
-                      : 'bg-zinc-900 text-zinc-300 border border-zinc-800'
-                  }`}>
+                  <div className={`max-w-[85%] rounded-2xl p-3 text-sm ${msg.role === 'user' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-900'}`}>
                     {msg.text}
                   </div>
                 </div>
               ))}
-
-              {/* Live transcription indicator */}
-              {learningVoice.isActive && (learningVoice.currentUserText || learningVoice.currentModelText) && (
-                <div className="space-y-2">
-                  {learningVoice.currentUserText && (
-                    <div className="flex justify-end">
-                      <div className="max-w-[85%] rounded-2xl p-3 text-sm bg-amber-400/50 text-black/70 italic">
-                        {learningVoice.currentUserText}...
-                      </div>
-                    </div>
-                  )}
-                  {learningVoice.currentModelText && (
-                    <div className="flex justify-start">
-                      <div className="max-w-[85%] rounded-2xl p-3 text-sm bg-zinc-900/50 text-zinc-400 border border-zinc-800 italic">
-                        {learningVoice.currentModelText}...
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {isChatLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-zinc-900 border border-zinc-800 p-3 rounded-2xl text-zinc-500 text-sm animate-pulse">
-                    Thinking...
+              
+              {/* Live transcript display */}
+              {currentTranscript && (
+                <div className="flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl p-3 text-sm bg-blue-50 text-blue-800 border-2 border-dashed border-blue-300 flex items-center gap-2">
+                    <span className="text-blue-500 animate-pulse">🎤</span>
+                    <span className="italic">"{currentTranscript}..."</span>
                   </div>
                 </div>
               )}
+              
+              {/* Typing indicator */}
+              {(isTyping || isChatLoading) && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-100 p-3 rounded-2xl flex items-center gap-3">
+                    <div className="flex gap-1">
+                      <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                    <span className="text-sm text-gray-600">AI is thinking...</span>
+                  </div>
+                </div>
+              )}
+              
+              {/* Auto-scroll anchor */}
               <div ref={chatEndRef} />
             </div>
-
-            {/* Chat Input */}
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!chatInput.trim() || isChatLoading || learningVoice.isActive) return;
-
-                const userMsg: ChatMessage = { role: 'user', text: chatInput, timestamp: Date.now() };
-                setChatMessages(prev => [...prev, userMsg]);
-                setChatInput('');
-                setIsChatLoading(true);
-
-                try {
-                  const history = chatMessages.map(m => ({ role: m.role, parts: [{ text: m.text }] }));
-                  const contextPrompt = `Context: Topic is "${course.topic}", current slide is "${currentSlide?.title}". `;
-                  const response = await generateChatResponse(history, contextPrompt + chatInput);
+            
+            {/* Input Area */}
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!chatInput.trim() || isChatLoading || isListening) return;
+              
+              const userMessage = chatInput;
+              setChatMessages(prev => [...prev, { role: 'user', text: userMessage, timestamp: Date.now() }]);
+              setChatInput('');
+              setIsChatLoading(true);
+              setIsTyping(true);
+              
+              try {
+                const history = chatMessages.map(m => ({ role: m.role, parts: [{ text: m.text }] }));
+                const contextPrompt = `Context: Topic is "${course.topic}", current slide is "${currentSlide?.title}". `;
+                const response = await generateChatResponse(history, contextPrompt + userMessage);
+                
+                setTimeout(() => {
                   setChatMessages(prev => [...prev, { role: 'model', text: response, timestamp: Date.now() }]);
-                } catch (err) {
-                  console.error('Chat error:', err);
-                  setChatMessages(prev => [...prev, { role: 'model', text: "Sorry, I had trouble responding. Please try again.", timestamp: Date.now() }]);
-                } finally {
-                  setIsChatLoading(false);
-                }
-              }}
-              className="p-3 bg-zinc-950 border-t border-zinc-900"
-            >
+                  setIsTyping(false);
+                }, 1000); // Simulate typing delay
+              } catch (err) {
+                console.error('Chat error:', err);
+                setChatMessages(prev => [...prev, { role: 'model', text: "Sorry, I had trouble responding. Please try again.", timestamp: Date.now() }]);
+                setIsTyping(false);
+              } finally {
+                setIsChatLoading(false);
+              }
+            }} className="p-3 border-t border-gray-100">
               <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder={learningVoice.isActive ? "Listening..." : "Ask a question..."}
-                  disabled={learningVoice.isActive}
-                  className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500 transition-colors disabled:opacity-50"
+                <input 
+                  type="text" 
+                  value={chatInput} 
+                  onChange={(e) => setChatInput(e.target.value)} 
+                  placeholder={isListening ? "Listening..." : "Ask a question..."} 
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50" 
+                  disabled={isListening || isChatLoading}
                 />
-                {/* Voice button */}
-                <button
+                <button 
                   type="button"
-                  onClick={() => learningVoice.isActive ? learningVoice.stop() : learningVoice.start()}
+                  onClick={() => {
+                    if (isListening) {
+                      setIsListening(false);
+                      setCurrentTranscript('');
+                    } else {
+                      setIsListening(true);
+                      // Simulate voice capture
+                      setTimeout(() => {
+                        setCurrentTranscript("What is quantum computing?");
+                        setIsListening(false);
+                        setTimeout(() => {
+                          setChatInput("What is quantum computing?");
+                          setCurrentTranscript('');
+                        }, 1000);
+                      }, 2000);
+                    }
+                  }}
+                  className={`rounded-xl px-3 py-2 transition-all duration-200 ${
+                    isListening 
+                      ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-lg shadow-red-500/25' 
+                      : 'bg-gray-200 hover:bg-gray-300 text-gray-700 hover:text-blue-600'
+                  }`}
                   disabled={isChatLoading}
-                  className={`rounded-xl px-3 py-2 transition-all ${
-                    learningVoice.isActive
-                      ? learningVoice.status === 'speaking'
-                        ? 'bg-purple-600 text-white animate-pulse'
-                        : 'bg-red-600 hover:bg-red-700 text-white'
-                      : 'bg-purple-600 hover:bg-purple-700 text-white'
-                  } disabled:opacity-50`}
-                  title={learningVoice.isActive ? 'Stop voice chat' : 'Start voice chat'}
+                  title={isListening ? 'Stop recording' : 'Start voice input'}
                 >
-                  {learningVoice.isActive ? <Icons.Stop /> : <Icons.Mic />}
+                  {isListening ? <Icons.Stop className="w-4 h-4" /> : <Icons.Mic className="w-4 h-4" />}
                 </button>
-                {/* Send button */}
-                <button
-                  type="submit"
-                  disabled={isChatLoading || learningVoice.isActive}
-                  className="bg-amber-400 hover:bg-amber-500 text-black rounded-xl px-3 py-2 disabled:opacity-50 transition-colors"
+                <button 
+                  type="submit" 
+                  disabled={isChatLoading || isListening || !chatInput.trim()} 
+                  className="bg-gray-900 hover:bg-gray-800 text-white rounded-xl px-3 py-2 disabled:opacity-50 transition-colors"
                 >
-                  <Icons.ArrowRight />
+                  <Icons.ArrowRight className="w-4 h-4" />
                 </button>
               </div>
             </form>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // ARTICLE VIEW - Long-form content
+  if (view === 'ARTICLE' && article) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="border-b border-gray-200 bg-white/95 backdrop-blur-sm sticky top-0 z-50">
+          <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+            <button
+              onClick={() => setView('HOME')}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors px-3 py-2 rounded-lg hover:bg-gray-100"
+            >
+              <Icons.ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <span className="font-medium text-gray-900">Article</span>
+          </div>
+        </header>
+
+        <main className="max-w-4xl mx-auto px-6 py-12">
+          <div className="space-y-8">
+            <div className="text-center space-y-4">
+              <h1 className="text-3xl md:text-4xl font-normal text-gray-900 leading-tight">{article.title}</h1>
+              <p className="text-lg text-gray-600 leading-relaxed">{article.overview}</p>
+            </div>
+
+            <div className="prose prose-lg max-w-none">
+              {article.sections.map((section) => (
+                <div key={section.id} className="mb-8">
+                  {section.imageUrl && (
+                    <div className="mb-6">
+                      <img 
+                        src={section.imageUrl} 
+                        alt={section.title}
+                        className="w-full max-w-2xl mx-auto rounded-xl shadow-sm"
+                      />
+                    </div>
+                  )}
+                  <div className="text-gray-900 leading-relaxed text-lg">
+                    {section.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // PRESENTATION VIEW - Slide-based presentation
+  if (view === 'PRESENTATION' && presentation) {
+    const currentSlide = presentation.slides[activePresentationSlide];
+    const isFirstSlide = activePresentationSlide === 0;
+    const isLastSlide = activePresentationSlide === presentation.slides.length - 1;
+
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex flex-col">
+        <header className="border-b border-gray-700 px-8 py-4 bg-gray-800">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setView('HOME')}
+              className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors px-3 py-2 rounded-lg hover:bg-gray-700"
+            >
+              <Icons.ArrowLeft className="w-4 h-4" /> Exit
+            </button>
+            <div className="text-sm text-gray-400">
+              {activePresentationSlide + 1} / {presentation.totalSlides}
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-4xl w-full">
+            {currentSlide && (
+              <div className="text-center space-y-8">
+                {currentSlide.imageUrls?.[0] && (
+                  <div className="mb-8">
+                    <img 
+                      src={currentSlide.imageUrls[0]} 
+                      alt={currentSlide.title}
+                      className="w-full max-w-2xl mx-auto rounded-xl shadow-lg"
+                    />
+                  </div>
+                )}
+                <h1 className="text-4xl md:text-5xl font-normal mb-8">{currentSlide.title}</h1>
+                <div className="space-y-4 text-left max-w-3xl mx-auto">
+                  {currentSlide.points.map((point, idx) => (
+                    <div key={idx} className="flex items-start gap-4 text-xl text-gray-200">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full mt-3 flex-shrink-0" />
+                      <span>{point}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+
+        <footer className="border-t border-gray-700 px-8 py-4 bg-gray-800">
+          <div className="flex items-center justify-between">
+            <button
+              disabled={isFirstSlide}
+              onClick={() => setActivePresentationSlide(prev => Math.max(0, prev - 1))}
+              className="flex items-center gap-2 px-4 py-2 text-gray-300 hover:text-white disabled:opacity-30 transition-colors"
+            >
+              <Icons.ArrowLeft className="w-4 h-4" /> Previous
+            </button>
+            <button
+              disabled={isLastSlide}
+              onClick={() => setActivePresentationSlide(prev => Math.min(presentation.slides.length - 1, prev + 1))}
+              className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-30 transition-colors font-medium"
+            >
+              Next <Icons.ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        </footer>
       </div>
     );
   }

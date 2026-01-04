@@ -6,8 +6,9 @@
 
 [![React](https://img.shields.io/badge/React-19.2.1-blue.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8.2-blue.svg)](https://www.typescriptlang.org/)
-[![Gemini AI](https://img.shields.io/badge/Gemini-AI-orange.svg)](https://ai.google.dev/)
+[![Gemini AI](https://img.shields.io/badge/Gemini-2.5%20Flash-orange.svg)](https://ai.google.dev/)
 [![Vite](https://img.shields.io/badge/Vite-6.2.0-purple.svg)](https://vitejs.dev/)
+[![Node.js](https://img.shields.io/badge/Node.js-22.14.0-green.svg)](https://nodejs.org/)
 
 *Revolutionizing education through personalized AI-driven learning experiences*
 
@@ -76,19 +77,23 @@ graph TD
 
 ### 🤖 AI-Powered Features
 
-- **Intelligent Curriculum Generation**: Creates structured learning paths with 3-6 modules
-- **Dynamic Content Creation**: Generates text, quizzes, exercises, and multimedia content
-- **Smart Image Selection**: AI-curated visuals from Wikimedia Commons and Pixabay
-- **Voice Interaction**: Real-time conversation with AI tutors using Gemini Live
-- **Adaptive Assessment**: Personalized quizzes and exercises based on learning progress
+- **Intelligent Curriculum Generation**: Creates structured learning paths with 3-6 modules using Gemini 2.5 Flash
+- **Dynamic Content Creation**: Generates text, quizzes, exercises, and multimedia content with Google Search grounding
+- **Smart Image Selection**: AI-curated visuals from Wikimedia Commons with parallel processing
+- **Voice Interaction**: Real-time conversation with AI tutors using Gemini Live Voice
+- **Text-to-Speech**: Natural voice narration with Gemini TTS models
+- **Adaptive Assessment**: Personalized quizzes and exercises with AI evaluation
+- **On-Demand Image Loading**: Optimized image selection triggered when modules are accessed
 
 ### 🎨 User Experience
 
 - **Guided vs Quick Generation**: Choose between AI consultation or instant curriculum creation
+- **Three Learning Modes**: Curriculum (structured), Article (long-form), Presentation (slides)
 - **Responsive Design**: Seamless experience across desktop and mobile devices
-- **Dark Theme**: Eye-friendly interface optimized for extended learning sessions
+- **Modern UI**: Clean, minimalistic interface with Unstop branding
 - **Resizable Panels**: Customizable workspace with draggable sidebars
-- **Progress Persistence**: Learning history saved locally for continuity
+- **Progress Persistence**: Learning history saved locally with completion tracking
+- **Interactive Elements**: Quizzes, fill-in-blanks, matching exercises, and reflection prompts
 
 ---
 
@@ -134,21 +139,24 @@ graph TB
 | **Styling** | Tailwind CSS | Latest | Utility-first styling |
 | **State Management** | React Hooks | Built-in | Local state management |
 | **Storage** | LocalStorage | Browser API | Persistence layer |
+| **Node.js** | Node.js | 22.14.0 | Runtime environment |
 
 ### AI Models Used
 
 ```mermaid
 graph LR
     subgraph "Gemini AI Models"
-        A[gemini-2.0-flash-exp] --> B[Curriculum Generation]
+        A[gemini-2.5-flash-lite] --> B[Curriculum Generation]
         A --> C[Content Creation]
+        A --> D[Consultant Chat]
         
-        D[gemini-1.5-flash] --> E[Image Analysis]
-        D --> F[Chat Responses]
+        E[gemini-2.0-flash-lite] --> F[Image Analysis]
+        E --> G[Chat Responses]
+        E --> H[Answer Evaluation]
         
-        G[gemini-2.0-flash-thinking-exp] --> H[Complex Reasoning]
+        I[gemini-2.5-flash-preview-tts] --> J[Text-to-Speech]
         
-        I[gemini-exp-1206] --> J[Voice Synthesis]
+        K[gemini-2.5-flash-native-audio-preview] --> L[Live Voice Chat]
     end
 ```
 
@@ -402,14 +410,14 @@ cp .env.example .env.local
 
 ### Environment Configuration
 
-Create a `.env.local` file with your API keys:
+Create a `.env` file with your API keys:
 
 ```env
 # Required: Gemini AI API Key
 GEMINI_API_KEY=your_gemini_api_key_here
 
-# Optional: Pixabay API Key (for additional images)
-PIXABAY_API_KEY=your_pixabay_key_here
+# Optional: Pixabay API Key (currently disabled, using Wikimedia only)
+PIXABY_KEY=your_pixabay_key_here
 ```
 
 ### Development Server
@@ -418,7 +426,7 @@ PIXABAY_API_KEY=your_pixabay_key_here
 # Start the development server
 npm run dev
 
-# Open your browser to http://localhost:5173
+# Open your browser to http://localhost:3000
 ```
 
 ### Production Build
@@ -638,12 +646,13 @@ graph TB
 
 | Feature | Model Used | Capability | Performance |
 |---------|------------|------------|-------------|
-| **Curriculum Generation** | gemini-2.0-flash-exp | High creativity, structured output | ⭐⭐⭐⭐⭐ |
-| **Content Creation** | gemini-2.0-flash-exp | Educational content, examples | ⭐⭐⭐⭐⭐ |
-| **Image Analysis** | gemini-1.5-flash | Visual understanding, selection | ⭐⭐⭐⭐ |
-| **Chat Responses** | gemini-1.5-flash | Conversational AI, tutoring | ⭐⭐⭐⭐ |
-| **Voice Synthesis** | gemini-exp-1206 | Natural speech, multiple voices | ⭐⭐⭐⭐ |
-| **Complex Reasoning** | gemini-2.0-flash-thinking-exp | Deep analysis, problem solving | ⭐⭐⭐⭐⭐ |
+| **Curriculum Generation** | gemini-2.5-flash-lite | High creativity, structured output | ⭐⭐⭐⭐⭐ |
+| **Content Creation** | gemini-2.5-flash-lite | Educational content with Google Search | ⭐⭐⭐⭐⭐ |
+| **Image Analysis** | gemini-2.0-flash-lite | Visual understanding, parallel processing | ⭐⭐⭐⭐ |
+| **Chat Responses** | gemini-2.0-flash-lite | Conversational AI, tutoring | ⭐⭐⭐⭐ |
+| **Voice Synthesis** | gemini-2.5-flash-preview-tts | Natural speech, Charon voice | ⭐⭐⭐⭐⭐ |
+| **Live Voice Chat** | gemini-2.5-flash-native-audio | Real-time voice interaction | ⭐⭐⭐⭐⭐ |
+| **Answer Evaluation** | gemini-2.0-flash-lite | AI-powered assessment | ⭐⭐⭐⭐ |
 
 ### Intelligent Features
 
@@ -657,20 +666,21 @@ graph TB
 ```mermaid
 flowchart TD
     A[Content Block] --> B[Extract Keywords]
-    B --> C[Search Wikimedia]
-    C --> D[Search Pixabay]
+    B --> C[Search Wikimedia Commons]
+    C --> D[Parallel Base64 Conversion]
     D --> E[AI Image Analysis]
     E --> F{Relevance Score}
-    F -->|High| G[Select Image]
-    F -->|Low| H[Try Alternative Keywords]
+    F -->|High| G[Select Best Image]
+    F -->|Low| H[AI Suggests New Keywords]
     H --> C
-    G --> I[Display to User]
+    G --> I[Cache & Display]
 ```
 
 #### 🗣️ **Voice Interaction System**
-- **Natural Conversation**: Gemini Live enables fluid voice interactions
+- **Natural Conversation**: Gemini Live enables fluid voice interactions with native audio
+- **Text-to-Speech**: Automated narration for all slide content using Charon voice
 - **Context Retention**: AI remembers conversation history for coherent dialogue
-- **Emotional Intelligence**: Responds appropriately to user's tone and mood
+- **Real-time Processing**: Low-latency voice responses with streaming support
 - **Multi-turn Reasoning**: Handles complex, multi-part questions effectively
 
 ---
@@ -759,14 +769,15 @@ graph LR
     
     subgraph "AI Performance"
         D[Content Generation] --> D1[< 30s curriculum]
-        E[Image Selection] --> E1[< 10s per image]
+        E[Image Selection] --> E1[Parallel processing]
         F[Voice Response] --> F1[< 2s latency]
+        G[TTS Generation] --> G1[Streaming audio]
     end
     
     subgraph "User Experience"
-        G[Engagement] --> G1[80%+ completion]
-        H[Satisfaction] --> H1[4.5+ rating]
-        I[Retention] --> I1[70%+ return rate]
+        H[Engagement] --> H1[80%+ completion]
+        I[Satisfaction] --> I1[4.5+ rating]
+        J[Retention] --> J1[70%+ return rate]
     end
 ```
 
@@ -774,21 +785,24 @@ graph LR
 
 #### ⚡ **Frontend Optimization**
 - **Code Splitting**: Dynamic imports for route-based chunks
-- **Lazy Loading**: Components and images loaded on demand
-- **Caching Strategy**: Aggressive caching of static assets
+- **On-Demand Loading**: Images loaded only when modules are accessed
+- **Caching Strategy**: Intelligent image caching with Map-based storage
 - **Bundle Analysis**: Regular monitoring of bundle size and dependencies
+- **Parallel Processing**: Concurrent image fetching and Base64 conversion
 
 #### 🤖 **AI Optimization**
-- **Model Selection**: Optimal model choice for each task
-- **Parallel Processing**: Concurrent API calls where possible
-- **Caching Layer**: Intelligent caching of AI responses
-- **Rate Limiting**: Respectful API usage with proper throttling
+- **Model Selection**: Latest Gemini 2.5 Flash models for optimal performance
+- **Google Search Grounding**: Enhanced content accuracy with real-time information
+- **Streaming Responses**: Real-time text and audio streaming
+- **Rate Limiting**: 3-second intervals between image analysis calls
+- **Intelligent Retries**: Automatic fallback with AI-suggested keywords
 
 #### 🖼️ **Media Optimization**
-- **Image Compression**: Automatic optimization of fetched images
-- **Format Selection**: WebP/AVIF for modern browsers
-- **Responsive Images**: Multiple sizes for different viewports
-- **CDN Integration**: Fast global content delivery
+- **Dual-URL Strategy**: Low-res for AI analysis, high-res for display
+- **Wikimedia Focus**: Primary source for educational accuracy
+- **Parallel Conversion**: Concurrent Base64 processing for speed
+- **Smart Fallbacks**: Placeholder generation for failed image loads
+- **Cooldown Management**: Optimized timing between image selections
 
 ### Performance Monitoring
 

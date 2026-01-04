@@ -7,7 +7,7 @@
 // API CONFIGURATION
 // ============================================
 export const API_CONFIG = {
-  GEMINI_API_KEY: process.env.API_KEY || "",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
   PIXABAY_API_KEY: process.env.PIXABAY_KEY || "",
 } as const;
 
