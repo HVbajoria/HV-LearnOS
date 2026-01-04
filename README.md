@@ -910,16 +910,13 @@ npm run dev
 ### Development Workflow
 
 ```mermaid
-gitgraph
-    commit id: "Initial"
-    branch feature/new-feature
-    checkout feature/new-feature
-    commit id: "Add feature"
-    commit id: "Add tests"
-    commit id: "Update docs"
-    checkout main
-    merge feature/new-feature
-    commit id: "Release"
+flowchart LR
+    A[Initial Commit] --> B[Create feature/new-feature branch]
+    B --> C[Add feature]
+    C --> D[Add tests]
+    D --> E[Update docs]
+    E --> F[Merge into main]
+    F --> G[Release]
 ```
 
 ### Code Style
